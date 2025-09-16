@@ -20,6 +20,7 @@ namespace GotifyWindowsClient
         private static ClientWebSocket _webSocket;
         private static bool _isConnected;
         private static readonly Mutex _mutex = new Mutex(true, "{8F6F0AC4-BC3B-4895-BC8F-5BBC8632465C}");
+        private static readonly string SoftwareName = "GotifyTray";
 
         [STAThread]
         static void Main()
@@ -161,6 +162,11 @@ namespace GotifyWindowsClient
             }
         }
 
+        /// <summary>
+        /// 设置开机自启
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private static void ToggleAutoStart(object sender, EventArgs e)
         {
             var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
@@ -168,22 +174,32 @@ namespace GotifyWindowsClient
 
             if (IsAutoStartEnabled())
             {
-                key.DeleteValue("GotifyTray");
+                key.DeleteValue(SoftwareName);
             }
             else
             {
-                key.SetValue("GotifyTray", appPath);
+                key.SetValue(SoftwareName, appPath);
             }
 
             UpdateAutoStartMenu();
         }
 
+        /// <summary>
+        /// 判断是否已开机自启
+        /// </summary>
+        /// <returns></returns>
         private static bool IsAutoStartEnabled()
         {
             var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false);
-            return key?.GetValue("GotifyTray") != null;
+            return key?.GetValue(SoftwareName) != null;
         }
 
+
+        /// <summary>
+        /// 弹窗提醒
+        /// </summary>
+        /// <param name="title"></param>
+        /// <param name="message"></param>
         private static void ShowNotification(string title, string message)
         {
             _trayIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.Info);
