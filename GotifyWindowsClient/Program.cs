@@ -189,7 +189,10 @@ namespace GotifyWindowsClient
             if (string.IsNullOrEmpty(text))
                 return null;
 
-            var match = Regex.Match(text, @"\d{4,8}");
+            if (!text.Contains("бщ") && !text.Contains("Ты") && !text.ToLowerInvariant().Contains("code"))
+                return null;
+
+            var match = Regex.Match(text, @"\d{4,7}");
             return match.Success ? match.Value : null;
         }
 
