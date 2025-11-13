@@ -7,10 +7,12 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using Microsoft.Toolkit.Uwp.Notifications;
 
 namespace GotifyWindowsClient
 {
@@ -30,10 +32,11 @@ namespace GotifyWindowsClient
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            ToastNotificationManagerCompat.OnActivated += OnToastActivated;
+
             var mainForm = new Form { ShowInTaskbar = false, WindowState = FormWindowState.Minimized };
             InitializeTray();
 
-            // 启动时最小化到托盘
             mainForm.Load += async (s, e) =>
             {
                 mainForm.Visible = false;
@@ -41,12 +44,13 @@ namespace GotifyWindowsClient
             };
 
             Application.Run(mainForm);
+            
+            ToastNotificationManagerCompat.Uninstall();
             _mutex.ReleaseMutex();
         }
 
         private static void InitializeTray()
         {
-            // 从当前程序文件提取图标
             var exePath = System.Reflection.Assembly.GetEntryAssembly().Location;
             var appIcon = Icon.ExtractAssociatedIcon(exePath);
             _trayIcon = new NotifyIcon
@@ -57,7 +61,6 @@ namespace GotifyWindowsClient
                 ContextMenuStrip = new ContextMenuStrip()
             };
 
-            // 动态更新自启动菜单文本
             UpdateAutoStartMenu();
 
             _trayIcon.ContextMenuStrip.Items.Add("退出", null, (s, e) =>
@@ -72,7 +75,6 @@ namespace GotifyWindowsClient
             const string separatorTag = "AutoStartSeparator";
             var currentText = IsAutoStartEnabled() ? "禁用开机自启" : "启用开机自启";
 
-            // 清理旧菜单项
             var itemsToRemove = new List<ToolStripItem>();
             foreach (ToolStripItem item in _trayIcon.ContextMenuStrip.Items)
             {
@@ -87,17 +89,14 @@ namespace GotifyWindowsClient
                 _trayIcon.ContextMenuStrip.Items.Remove(item);
             }
 
-            // 创建新菜单项
             var autoStartItem = new ToolStripMenuItem(currentText)
             {
                 Tag = "AutoStart"
             };
             autoStartItem.Click += ToggleAutoStart;
 
-            // 创建带标识的分隔线
             var separator = new ToolStripSeparator { Tag = separatorTag };
 
-            // 插入到菜单顶部（保留退出按钮在底部）
             _trayIcon.ContextMenuStrip.Items.Insert(0, autoStartItem);
             _trayIcon.ContextMenuStrip.Items.Insert(1, separator);
         }
@@ -162,11 +161,6 @@ namespace GotifyWindowsClient
             }
         }
 
-        /// <summary>
-        /// 设置开机自启
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
         private static void ToggleAutoStart(object sender, EventArgs e)
         {
             var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
@@ -184,25 +178,90 @@ namespace GotifyWindowsClient
             UpdateAutoStartMenu();
         }
 
-        /// <summary>
-        /// 判断是否已开机自启
-        /// </summary>
-        /// <returns></returns>
         private static bool IsAutoStartEnabled()
         {
             var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false);
             return key?.GetValue(SoftwareName) != null;
         }
 
+        private static string? ExtractVerificationCode(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return null;
 
-        /// <summary>
-        /// 弹窗提醒
-        /// </summary>
-        /// <param name="title"></param>
-        /// <param name="message"></param>
+            var match = Regex.Match(text, @"\d{4,8}");
+            return match.Success ? match.Value : null;
+        }
+
         private static void ShowNotification(string title, string message)
         {
-            _trayIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.Info);
+            var verificationCode = ExtractVerificationCode(message);
+
+            if (verificationCode != null)
+            {
+                try
+                {
+                    new ToastContentBuilder()
+                        .AddText(title)
+                        .AddText(message)
+                        .AddButton(new ToastButton()
+                            .SetContent($"复制验证码: {verificationCode}")
+                            .AddArgument("action", "copy")
+                            .AddArgument("code", verificationCode)
+                            .SetBackgroundActivation())
+                        .Show();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Toast 失败: {ex.Message}");
+                    _trayIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.Info);
+                }
+            }
+            else
+            {
+                _trayIcon.ShowBalloonTip(3000, title, message, ToolTipIcon.Info);
+            }
+        }
+
+        private static void CopyToClipboard(string text)
+        {
+            try
+            {
+                var thread = new Thread(() =>
+                {
+                    try
+                    {
+                        Clipboard.SetDataObject(text, true);
+                        Debug.WriteLine($"剪贴板复制成功: {text}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"剪贴板复制失败: {ex.Message}");
+                    }
+                });
+                
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                thread.Join();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"创建剪贴板线程失败: {ex.Message}");
+            }
+        }
+
+        private static void OnToastActivated(ToastNotificationActivatedEventArgsCompat e)
+        {
+            var args = ToastArguments.Parse(e.Argument);
+
+            if (args.Contains("action") && args["action"] == "copy")
+            {
+                if (args.Contains("code"))
+                {
+                    var code = args["code"];
+                    CopyToClipboard(code);
+                }
+            }
         }
     }
 }
